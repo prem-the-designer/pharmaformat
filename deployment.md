@@ -22,7 +22,12 @@ These platforms are easiest for setting up subdomains (e.g., `app.yourdomain.com
 2.  Log in to [Vercel](https://vercel.com/) and click "Add New Project".
 3.  Import your GitHub repository.
 4.  Vercel detects Vite automatically. Click **Deploy**.
-5.  **Domain Setup**: Go to Settings > Domains and add your subdomain (e.g., `pharma.example.com`). Follow the DNS instructions (usually adding a CNAME record).
+5.  **Environment Variables**:
+    -   Go to **Settings > Environment Variables**.
+    -   Add: `VITE_SUPABASE_URL` (Value: your project url)
+    -   Add: `VITE_SUPABASE_ANON_KEY` (Value: your anon key)
+    -   **Redeploy** (Go to Deployments > Redeploy) for changes to take effect.
+6.  **Domain Setup**: Go to Settings > Domains and add your subdomain (e.g., `pharma.example.com`). Follow the DNS instructions (usually adding a CNAME record).
 
 #### Option B: Traditional Web Server (cPanel/Apache/Nginx)
 1.  Upload the **contents** of the `dist/` folder to your server's public html folder (e.g., `public_html/subdomain`).
