@@ -1,137 +1,163 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
 
 const DictionaryContext = createContext();
 
-const DEFAULT_DICTIONARY = {
-    "darzalex faspro": { brand: "DARZALEX FASPRO", generic: "Daratumumab and hyaluronidase-fihj" },
-    "keytruda": { brand: "KEYTRUDA", generic: "Pembrolizumab" },
-    "tecentriq": { brand: "TECENTRIQ", generic: "Atezolizumab" },
-    "opdivo": { brand: "OPDIVO", generic: "Nivolumab" }
-};
-
-const STORAGE_KEY = 'drug_dictionary_v1';
-
-// Migration Helper
-function migrateDictionary(data) {
-    const migrated = {};
-    if (!data) return DEFAULT_DICTIONARY;
-
-    Object.entries(data).forEach(([key, value]) => {
-        if (typeof value === 'string') {
-            // Migrate string to object
-            // Default: Use key as Brand (Uppercased?) and value as Generic (Capitalized?)
-            // Or just keep as is. Let's try to infer standard casing if migrating.
-            migrated[key.toLowerCase()] = {
-                brand: key.toUpperCase(), // Best guess for existing keys
-                generic: value.charAt(0).toUpperCase() + value.slice(1)
-            };
-        } else if (typeof value === 'object' && value.brand && value.generic) {
-            // Already migrated format
-            migrated[key.toLowerCase()] = {
-                brand: value.brand.trim(),
-                generic: value.generic.trim()
-            };
-        }
-    });
-    return Object.keys(migrated).length > 0 ? migrated : DEFAULT_DICTIONARY;
-}
+// Default dictionary for fallback or initial optimistic load
+const DEFAULT_DICTIONARY = {};
 
 export function DictionaryProvider({ children }) {
-    const [dictionary, setDictionary] = useState(() => {
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            const parsed = stored ? JSON.parse(stored) : DEFAULT_DICTIONARY;
-            return migrateDictionary(parsed);
-        } catch (e) {
-            console.error("Failed to load dictionary", e);
-            return DEFAULT_DICTIONARY;
-        }
-    });
+    const [dictionary, setDictionary] = useState(DEFAULT_DICTIONARY);
+    const [loading, setLoading] = useState(true);
 
+    // Initial Load from Supabase
     useEffect(() => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(dictionary));
-    }, [dictionary]);
+        async function fetchDictionary() {
+            setLoading(true);
+            try {
+                const { data, error } = await supabase
+                    .from('dictionary')
+                    .select('*');
 
-    const addEntry = (brand, generic) => {
-        const key = brand.toLowerCase().trim();
-        if (!key || !generic) return;
+                if (error) throw error;
 
-        setDictionary(prev => ({
-            ...prev,
-            [key]: {
-                brand: brand.trim(), // Store exact display casing
-                generic: generic.trim()
+                if (data && data.length > 0) {
+                    const dict = {};
+                    data.forEach(item => {
+                        if (item.brand && item.generic) {
+                            dict[item.brand.toLowerCase()] = {
+                                brand: item.brand,
+                                generic: item.generic
+                            };
+                        }
+                    });
+                    setDictionary(dict);
+                } else {
+                    setDictionary({});
+                }
+            } catch (err) {
+                console.error("Error loading dictionary from Supabase:", err.message);
+            } finally {
+                setLoading(false);
             }
-        }));
+        }
+
+        fetchDictionary();
+    }, []);
+
+    const addEntry = async (brand, generic) => {
+        if (!brand || !generic) return;
+
+        // Optimistic Update
+        const key = brand.toLowerCase().trim();
+        const newEntry = { brand: brand.trim(), generic: generic.trim() };
+
+        setDictionary(prev => ({ ...prev, [key]: newEntry }));
+
+        try {
+            const { error } = await supabase
+                .from('dictionary')
+                .upsert({ brand: newEntry.brand, generic: newEntry.generic }, { onConflict: 'brand' });
+
+            if (error) throw error;
+        } catch (err) {
+            console.error("Error adding entry to Supabase:", err.message);
+        }
     };
 
-    const removeEntry = (brand) => {
+    const removeEntry = async (brand) => {
         const key = brand.toLowerCase().trim();
+
+        // Optimistic Update
         setDictionary(prev => {
             const next = { ...prev };
             delete next[key];
             return next;
         });
+
+        try {
+            const { error } = await supabase
+                .from('dictionary')
+                .delete()
+                .eq('brand', brand);
+
+            if (error) throw error;
+        } catch (err) {
+            console.error("Error removing entry:", err.message);
+        }
     };
 
-    const updateEntry = (oldBrand, newBrand, newGeneric) => {
+    const updateEntry = async (oldBrand, newBrand, newGeneric) => {
         const oldKey = oldBrand.toLowerCase().trim();
         const newKey = newBrand.toLowerCase().trim();
 
         if (!newKey || !newGeneric) return;
 
+        // Optimistic
         setDictionary(prev => {
             const next = { ...prev };
-            if (oldKey !== newKey) {
-                delete next[oldKey];
-            }
-            // Update with new display values
-            next[newKey] = {
-                brand: newBrand.trim(),
-                generic: newGeneric.trim()
-            };
+            if (oldKey !== newKey) delete next[oldKey];
+            next[newKey] = { brand: newBrand.trim(), generic: newGeneric.trim() };
             return next;
         });
+
+        try {
+            if (oldKey !== newKey) {
+                await supabase.from('dictionary').delete().eq('brand', oldBrand);
+            }
+            await supabase
+                .from('dictionary')
+                .upsert({ brand: newBrand.trim(), generic: newGeneric.trim() }, { onConflict: 'brand' });
+
+        } catch (err) {
+            console.error("Error updating entry:", err.message);
+        }
     };
 
-    const resetDictionary = () => {
-        setDictionary(DEFAULT_DICTIONARY);
+    const resetDictionary = async () => {
+        window.location.reload();
     };
 
-    const importDictionary = (newEntries) => {
-        let entriesToMerge = {};
+    const importDictionary = async (newEntries) => {
+        let entriesToInsert = [];
 
-        // Helper to process entry
         const process = (b, g) => {
             if (b && g) {
-                entriesToMerge[b.toLowerCase().trim()] = {
-                    brand: b.trim(),
-                    generic: g.trim()
-                };
+                entriesToInsert.push({ brand: b.trim(), generic: g.trim() });
             }
         };
 
         if (Array.isArray(newEntries)) {
-            newEntries.forEach(item => {
-                // Support both [{brand, generic}] and maybe simple strings if any (unlikely from our export)
-                process(item.brand, item.generic);
-            });
+            newEntries.forEach(item => process(item.brand, item.generic));
         } else if (typeof newEntries === 'object' && newEntries !== null) {
             Object.entries(newEntries).forEach(([k, v]) => {
-                if (typeof v === 'string') {
-                    process(k, v);
-                } else if (typeof v === 'object' && v.brand && v.generic) {
-                    process(v.brand, v.generic);
-                }
+                if (typeof v === 'string') process(k, v);
+                else if (typeof v === 'object') process(v.brand, v.generic);
             });
         }
 
-        if (Object.keys(entriesToMerge).length > 0) {
-            setDictionary(prev => ({
-                ...prev,
-                ...entriesToMerge
-            }));
-            return Object.keys(entriesToMerge).length;
+        if (entriesToInsert.length > 0) {
+            // Optimistic Update
+            setDictionary(prev => {
+                const next = { ...prev };
+                entriesToInsert.forEach(item => {
+                    next[item.brand.toLowerCase()] = item;
+                });
+                return next;
+            });
+
+            // Batch Insert
+            try {
+                const { error } = await supabase
+                    .from('dictionary')
+                    .upsert(entriesToInsert, { onConflict: 'brand' });
+
+                if (error) throw error;
+                return entriesToInsert.length;
+            } catch (err) {
+                console.error("Bulk import error:", err.message);
+                return 0;
+            }
         }
         return 0;
     };
@@ -139,7 +165,7 @@ export function DictionaryProvider({ children }) {
     const getEntry = (brand) => dictionary[brand.toLowerCase().trim()];
 
     return (
-        <DictionaryContext.Provider value={{ dictionary, addEntry, removeEntry, updateEntry, importDictionary, getEntry, resetDictionary }}>
+        <DictionaryContext.Provider value={{ dictionary, addEntry, removeEntry, updateEntry, importDictionary, getEntry, resetDictionary, loading }}>
             {children}
         </DictionaryContext.Provider>
     );
