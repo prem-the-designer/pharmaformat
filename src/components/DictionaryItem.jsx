@@ -3,9 +3,13 @@ import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { useDictionary } from '../context/DictionaryContext';
 
-export function DictionaryItem({ brand, generic }) {
-    const { updateEntry, removeEntry } = useDictionary();
+export function DictionaryItem({ brand, generic, onRemove }) {
+    const { updateEntry } = useDictionary();
+
     const [isEditing, setIsEditing] = useState(false);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+    // Edit State
     const [editBrand, setEditBrand] = useState(brand);
     const [editGeneric, setEditGeneric] = useState(generic);
 
@@ -20,6 +24,10 @@ export function DictionaryItem({ brand, generic }) {
         setEditBrand(brand);
         setEditGeneric(generic);
         setIsEditing(false);
+    };
+
+    const handleConfirmDelete = () => {
+        onRemove(brand);
     };
 
     if (isEditing) {
@@ -70,7 +78,7 @@ export function DictionaryItem({ brand, generic }) {
                 <Button
                     variant="danger"
                     className="text-xs py-1.5 bg-red-50 hover:bg-red-100 text-red-600 shadow-none border border-transparent hover:border-red-200"
-                    onClick={() => removeEntry(brand)}
+                    onClick={() => onRemove(brand)}
                 >
                     Remove
                 </Button>

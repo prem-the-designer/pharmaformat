@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useDictionary } from '../context/DictionaryContext';
-import { formatAndTokenize, TOKEN_TYPES } from '../utils/formatter';
+import { formatAndTokenize, TOKEN_TYPES, findSuggestion } from '../utils/formatter';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { UnknownDrugPanel } from './ui/UnknownDrugPanel';
@@ -14,14 +14,12 @@ export default function Formatter() {
 
     // Interaction State
     const [activeCandidate, setActiveCandidate] = useState(null); // { text, rect }
+    const outputRef = useRef(null);
 
     useEffect(() => {
         // Re-run tokenization when input, dict, or ignoreList changes
         const result = formatAndTokenize(input, dictionary, ignoreList);
         setTokens(result);
-        // Determine plain text for copy
-        // const plainText = result.map(t => t.content).join('');
-        // setFormatted(plainText); 
     }, [input, dictionary, ignoreList]);
 
     const handleCopy = async () => {
@@ -42,6 +40,7 @@ export default function Formatter() {
 
         setActiveCandidate({
             text,
+            suggestion: e.target.dataset.suggestion ? JSON.parse(e.target.dataset.suggestion) : null,
             position: {
                 top: rect.bottom - containerRect.top, // Relative to container
                 left: rect.left - containerRect.left
@@ -56,6 +55,48 @@ export default function Formatter() {
 
     const handleIgnoreUnknown = (brand) => {
         setIgnoreList(prev => new Set(prev).add(brand.toLowerCase()));
+        setActiveCandidate(null);
+    };
+
+    const handleManualHighlight = () => {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return;
+
+        const text = selection.toString().trim();
+        if (!text) return;
+
+        // Get Position
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        // Relative to container
+        let top = 0;
+        let left = 0;
+
+        if (outputRef.current) {
+            const containerRect = outputRef.current.closest('.relative').getBoundingClientRect();
+            top = rect.bottom - containerRect.top;
+            left = rect.left - containerRect.left;
+        }
+
+        // Check for suggestion
+        const suggestion = findSuggestion(text, dictionary);
+
+        setActiveCandidate({
+            text,
+            suggestion,
+            position: { top, left }
+        });
+    };
+
+    const handleReplace = (newBrand) => {
+        // Replace all instances of the typo with the correct brand
+        // We use a safe regex replacement
+        const escapeRegExp = (curr) => curr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const escapedCurrent = escapeRegExp(activeCandidate.text);
+        const regex = new RegExp(`\\b${escapedCurrent}\\b`, 'g');
+
+        setInput(prev => prev.replace(regex, newBrand));
         setActiveCandidate(null);
     };
 
@@ -84,11 +125,25 @@ export default function Formatter() {
                         <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
                         Formatted Output
                     </h2>
-                    <Button variant="primary" onClick={handleCopy} className="text-xs py-1 px-3 shadow-none">
-                        {copied ? 'Copied!' : 'Copy Text'}
-                    </Button>
+                    <div className="flex gap-2">
+                        <Button
+                            variant="secondary"
+                            onClick={handleManualHighlight}
+                            className="text-xs py-1 px-3 shadow-none flex items-center gap-1 border border-blue-200 bg-white"
+                            title="Highlight selected text to add/correct"
+                        >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                            Highlight
+                        </Button>
+                        <Button variant="primary" onClick={handleCopy} className="text-xs py-1 px-3 shadow-none">
+                            {copied ? 'Copied!' : 'Copy Text'}
+                        </Button>
+                    </div>
                 </div>
-                <div className="flex-1 w-full p-6 overflow-auto leading-relaxed font-mono text-sm whitespace-pre-wrap relative">
+                <div
+                    ref={outputRef}
+                    className="flex-1 w-full p-6 overflow-auto leading-relaxed font-mono text-sm whitespace-pre-wrap relative"
+                >
                     {tokens.length === 0 && <span className="text-slate-400 italic">Formatted text will appear here...</span>}
 
                     {tokens.map((token, idx) => {
@@ -96,9 +151,10 @@ export default function Formatter() {
                             return (
                                 <span
                                     key={idx}
-                                    className="bg-yellow-100 border-b-2 border-dashed border-yellow-400 cursor-pointer hover:bg-yellow-200 text-slate-800"
+                                    className={`border-b-2 border-dashed cursor-pointer text-slate-800 ${token.data?.suggestion ? 'bg-orange-50 border-orange-300 hover:bg-orange-100' : 'bg-yellow-100 border-yellow-400 hover:bg-yellow-200'}`}
                                     onClick={(e) => handleUnknownClick(e, token.content)}
-                                    title="Unknown Drug - Click to Add"
+                                    title={token.data?.suggestion ? "Possible Typo" : "Unknown Drug"}
+                                    data-suggestion={token.data?.suggestion ? JSON.stringify(token.data.suggestion) : ''}
                                 >
                                     {token.content}
                                 </span>
@@ -111,8 +167,11 @@ export default function Formatter() {
                     {activeCandidate && (
                         <UnknownDrugPanel
                             candidate={activeCandidate.text}
+                            suggestion={activeCandidate.suggestion}
                             position={activeCandidate.position}
+                            dictionary={dictionary}
                             onAdd={handleAddUnknown}
+                            onReplace={handleReplace}
                             onIgnore={handleIgnoreUnknown}
                             onClose={() => setActiveCandidate(null)}
                         />

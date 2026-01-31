@@ -1,21 +1,47 @@
 import { useState, useRef, useMemo } from 'react';
 import { useDictionary } from '../context/DictionaryContext';
+import { useToast } from '../context/ToastContext';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { DictionaryItem } from './DictionaryItem';
+import { ConfirmationModal } from './ui/ConfirmationModal';
+import { ImportPreviewModal } from './ui/ImportPreviewModal';
 
 export default function DictionaryEditor() {
-    const { dictionary, addEntry, removeEntry, importDictionary } = useDictionary();
+    const { dictionary, addEntry, removeEntry, importDictionary, analyzeImport } = useDictionary();
+    const { showToast } = useToast();
+
     const [newBrand, setNewBrand] = useState('');
     const [newGeneric, setNewGeneric] = useState('');
     const [search, setSearch] = useState('');
     const [importStatus, setImportStatus] = useState('');
 
+    // Import State
+    const [importStats, setImportStats] = useState(null); // { newCount, duplicateCount, entries }
+    const fileInputRef = useRef(null);
+
+    // Deletion State
+    const [itemToDelete, setItemToDelete] = useState(null); // { brand, generic }
+
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(10);
 
-    const fileInputRef = useRef(null);
+    // ... handlers ...
+
+    const confirmDelete = () => {
+        if (!itemToDelete) return;
+
+        const { brand, generic } = itemToDelete;
+        removeEntry(brand);
+        setItemToDelete(null);
+
+        showToast(
+            `"${brand}" removed`,
+            () => addEntry(brand, generic),
+            4000
+        );
+    };
 
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -34,9 +60,8 @@ export default function DictionaryEditor() {
         reader.onload = (event) => {
             try {
                 const json = JSON.parse(event.target.result);
-                const count = importDictionary(json);
-                setImportStatus(`Successfully imported/merged ${count} entries.`);
-                setTimeout(() => setImportStatus(''), 3000);
+                const stats = analyzeImport(json);
+                setImportStats(stats);
             } catch (err) {
                 setImportStatus('Error: Invalid JSON format.');
                 setTimeout(() => setImportStatus(''), 3000);
@@ -45,6 +70,19 @@ export default function DictionaryEditor() {
         reader.readAsText(file);
         // Reset input
         e.target.value = '';
+    };
+
+    const handleImportProceed = async () => {
+        if (!importStats || !importStats.entries) return;
+
+        try {
+            const count = await importDictionary(importStats.entries);
+            setImportStatus(`Successfully imported/merged ${count} entries.`);
+            setTimeout(() => setImportStatus(''), 3000);
+            setImportStats(null);
+        } catch (err) {
+            setImportStatus('Error importing entries.');
+        }
     };
 
     // Filter and Sort entries
@@ -158,7 +196,12 @@ export default function DictionaryEditor() {
             <div className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
                 {paginatedEntries.length > 0 ? (
                     paginatedEntries.map(([key, value]) => (
-                        <DictionaryItem key={key} brand={value.brand} generic={value.generic} />
+                        <DictionaryItem
+                            key={key}
+                            brand={value.brand}
+                            generic={value.generic}
+                            onRemove={() => setItemToDelete({ brand: value.brand, generic: value.generic })}
+                        />
                     ))
                 ) : (
                     <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-xl border-dashed border-2 border-slate-200">
@@ -191,6 +234,23 @@ export default function DictionaryEditor() {
                     </Button>
                 </div>
             )}
+
+            <ConfirmationModal
+                isOpen={!!itemToDelete}
+                title="Remove Entry?"
+                message={`Are you sure want to remove the drug "${itemToDelete?.brand}" from the dictionary?`}
+                confirmText="Remove"
+                cancelText="Cancel"
+                onConfirm={confirmDelete}
+                onCancel={() => setItemToDelete(null)}
+            />
+
+            <ImportPreviewModal
+                isOpen={!!importStats}
+                stats={importStats}
+                onProceed={handleImportProceed}
+                onCancel={() => setImportStats(null)}
+            />
         </div>
     );
 }
