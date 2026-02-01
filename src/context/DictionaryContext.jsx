@@ -51,11 +51,12 @@ export function DictionaryProvider({ children }) {
     const addEntry = async (brand, generic) => {
         if (!brand || !generic) return;
 
-        const key = brand.toLowerCase().trim();
+        const formattedBrand = brand.trim(); // Store exactly as typed (just trimmed)
+        const key = formattedBrand.toLowerCase();
 
         // Duplicate Check
         if (dictionary[key]) {
-            showToast(`Already the ${brand} is added`, 'warning');
+            showToast(`Already the ${dictionary[key].brand} is added`, 'warning'); // Show existing brand execution
             return;
         }
 
@@ -105,7 +106,8 @@ export function DictionaryProvider({ children }) {
 
     const updateEntry = async (oldBrand, newBrand, newGeneric) => {
         const oldKey = oldBrand.toLowerCase().trim();
-        const newKey = newBrand.toLowerCase().trim();
+        const formattedNewBrand = newBrand.trim();
+        const newKey = formattedNewBrand.toLowerCase();
 
         if (!newKey || !newGeneric) return;
 
@@ -113,7 +115,7 @@ export function DictionaryProvider({ children }) {
         setDictionary(prev => {
             const next = { ...prev };
             if (oldKey !== newKey) delete next[oldKey];
-            next[newKey] = { brand: newBrand.trim(), generic: newGeneric.trim() };
+            next[newKey] = { brand: formattedNewBrand, generic: newGeneric.trim() };
             return next;
         });
 
@@ -123,7 +125,7 @@ export function DictionaryProvider({ children }) {
             }
             await supabase
                 .from('dictionary')
-                .upsert({ brand: newBrand.trim(), generic: newGeneric.trim() }, { onConflict: 'brand' });
+                .upsert({ brand: formattedNewBrand, generic: newGeneric.trim() }, { onConflict: 'brand' });
 
         } catch (err) {
             console.error("Error updating entry:", err.message);

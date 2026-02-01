@@ -26,11 +26,12 @@ export function ToastProvider({ children }) {
             }
         }
 
-        setToast({ message, type, onUndo, id: Date.now() });
+        const toastId = Date.now();
+        setToast({ message, type, onUndo, id: toastId });
 
         if (duration) {
             setTimeout(() => {
-                setToast(prev => (prev && prev.id === Date.now() ? null : prev)); // Only clear if same toast
+                setToast(prev => (prev && prev.id === toastId ? null : prev));
             }, duration);
         }
     }, []);

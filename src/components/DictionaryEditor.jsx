@@ -38,8 +38,8 @@ export default function DictionaryEditor() {
 
         showToast(
             `"${brand}" removed`,
-            () => addEntry(brand, generic),
-            4000
+            'error',
+            () => addEntry(brand, generic)
         );
     };
 

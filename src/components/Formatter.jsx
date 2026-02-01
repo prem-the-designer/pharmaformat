@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useDictionary } from '../context/DictionaryContext';
 import { formatAndTokenize, TOKEN_TYPES, findSuggestion } from '../utils/formatter';
 import { Card } from './ui/Card';
@@ -42,8 +43,8 @@ export default function Formatter() {
             text,
             suggestion: e.target.dataset.suggestion ? JSON.parse(e.target.dataset.suggestion) : null,
             position: {
-                top: rect.bottom - containerRect.top, // Relative to container
-                left: rect.left - containerRect.left
+                top: rect.bottom, // Viewport coordinates for fixed
+                left: rect.left
             }
         });
     };
@@ -69,23 +70,13 @@ export default function Formatter() {
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
 
-        // Relative to container
-        let top = 0;
-        let left = 0;
-
-        if (outputRef.current) {
-            const containerRect = outputRef.current.closest('.relative').getBoundingClientRect();
-            top = rect.bottom - containerRect.top;
-            left = rect.left - containerRect.left;
-        }
-
         // Check for suggestion
         const suggestion = findSuggestion(text, dictionary);
 
         setActiveCandidate({
             text,
             suggestion,
-            position: { top, left }
+            position: { top: rect.bottom, left: rect.left } // Viewport coords
         });
     };
 
@@ -114,7 +105,10 @@ export default function Formatter() {
                     className="flex-1 w-full p-6 bg-transparent resize-none focus:outline-none focus:bg-white/30 transition-colors text-slate-700 leading-relaxed font-mono text-sm placeholder:text-slate-300"
                     placeholder="Paste medical text here... e.g., 'Darzalex Faspro-based treatment approved...'"
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={(e) => {
+                        setInput(e.target.value);
+                        setActiveCandidate(null); // Close panel on any text change
+                    }}
                     spellCheck="false"
                 />
             </Card>
@@ -142,7 +136,8 @@ export default function Formatter() {
                 </div>
                 <div
                     ref={outputRef}
-                    className="flex-1 w-full p-6 overflow-auto leading-relaxed font-mono text-sm whitespace-pre-wrap relative"
+                    className="flex-1 w-full p-6 overflow-y-auto overflow-x-hidden leading-relaxed font-mono text-sm whitespace-pre-wrap relative"
+                    onScroll={() => setActiveCandidate(null)} // Close popup on scroll
                 >
                     {tokens.length === 0 && <span className="text-slate-400 italic">Formatted text will appear here...</span>}
 
@@ -164,7 +159,7 @@ export default function Formatter() {
                         return <span key={idx} className="text-slate-800">{token.content}</span>;
                     })}
 
-                    {activeCandidate && (
+                    {activeCandidate && createPortal(
                         <UnknownDrugPanel
                             candidate={activeCandidate.text}
                             suggestion={activeCandidate.suggestion}
@@ -174,7 +169,8 @@ export default function Formatter() {
                             onReplace={handleReplace}
                             onIgnore={handleIgnoreUnknown}
                             onClose={() => setActiveCandidate(null)}
-                        />
+                        />,
+                        document.body
                     )}
                 </div>
             </Card>

@@ -6,6 +6,7 @@ export function UnknownDrugPanel({ candidate, suggestion, position, dictionary, 
     const [genericName, setGenericName] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
+    const [forceUppercase, setForceUppercase] = useState(false);
 
     // Close on Escape
     useEffect(() => {
@@ -31,19 +32,43 @@ export function UnknownDrugPanel({ candidate, suggestion, position, dictionary, 
         setSearchResults(matches);
     }, [searchQuery, dictionary]);
 
+    const effectiveCandidate = forceUppercase ? candidate.toUpperCase() : candidate;
+
+    // Check if candidate matches any Brand, Generic, or Formatted "Brand (Generic)"
+    const isKnownDrug = dictionary ? Object.values(dictionary).some(entry => {
+        const lowerCand = candidate.trim().toLowerCase();
+        const brand = entry.brand.toLowerCase();
+        const generic = entry.generic.toLowerCase();
+        const formatted = `${brand} (${generic})`;
+
+        return lowerCand === brand || lowerCand === generic || lowerCand === formatted;
+    }) : false;
+
     const handleGoogleSearch = () => {
-        window.open(`https://www.google.com/search?q=${encodeURIComponent(candidate + ' drug')}`, '_blank');
+        window.open(`https://www.google.com/search?q=${encodeURIComponent(effectiveCandidate + ' drug')}`, '_blank');
     };
 
     return (
         <div
-            className="absolute z-50 w-80 animate-in fade-in zoom-in-95 duration-200"
-            style={{ top: position.top + 24, left: position.left }}
+            className="fixed z-50 w-80 animate-in fade-in zoom-in-95 duration-200"
+            style={{ top: position.top + 8, left: position.left }}
         >
             <Card className="p-4 shadow-xl border-blue-500/30 ring-1 ring-blue-500/20 bg-white max-h-[80vh] overflow-y-auto">
                 <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-bold text-slate-800">Unknown Drug</h3>
-                    <div className="flex gap-1">
+                    <h3 className="font-bold text-slate-800">{isKnownDrug ? 'Drug Detected' : 'Unknown Drug'}</h3>
+                    <div className="flex gap-1 items-center">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setForceUppercase(!forceUppercase);
+                            }}
+                            className={`p-1 rounded transition-colors ${forceUppercase ? 'text-blue-600 bg-blue-100' : 'text-slate-400 hover:text-blue-500 hover:bg-slate-100'}`}
+                            title="Toggle Capitalize"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+                            </svg>
+                        </button>
                         <button
                             onClick={handleGoogleSearch}
                             className="text-slate-400 hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 transition-colors"
@@ -57,17 +82,17 @@ export function UnknownDrugPanel({ candidate, suggestion, position, dictionary, 
                     </div>
                 </div>
 
-                <div className="text-blue-600 font-mono text-sm mb-4 bg-blue-50 p-2 rounded break-all border border-blue-100">{candidate}</div>
+                <div className="text-blue-600 font-mono text-sm mb-4 bg-blue-50 p-2 rounded break-all border border-blue-100">{effectiveCandidate}</div>
 
                 {suggestion && (
                     <div className="mb-4 bg-orange-50 border border-orange-100 rounded-lg p-3">
                         <div className="text-[10px] uppercase font-bold text-orange-400 mb-1 tracking-wider">Did you mean?</div>
                         <button
-                            onClick={() => onReplace(suggestion.brand)}
+                            onClick={() => onReplace(forceUppercase ? suggestion.brand.toUpperCase() : suggestion.brand)}
                             className="w-full text-left group"
                         >
                             <div className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
-                                {suggestion.brand}
+                                {forceUppercase ? suggestion.brand.toUpperCase() : suggestion.brand}
                             </div>
                             <div className="text-xs text-slate-500 capitalize">
                                 {suggestion.generic}
@@ -92,9 +117,9 @@ export function UnknownDrugPanel({ candidate, suggestion, position, dictionary, 
                                 <button
                                     key={res.brand}
                                     className="w-full text-left p-2 hover:bg-blue-50 transition-colors flex flex-col"
-                                    onClick={() => onReplace(res.brand)}
+                                    onClick={() => onReplace(forceUppercase ? res.brand.toUpperCase() : res.brand)}
                                 >
-                                    <span className="text-sm font-medium text-slate-700">{res.brand}</span>
+                                    <span className="text-sm font-medium text-slate-700">{forceUppercase ? res.brand.toUpperCase() : res.brand}</span>
                                     <span className="text-xs text-slate-400">{res.generic}</span>
                                 </button>
                             ))}
@@ -114,16 +139,16 @@ export function UnknownDrugPanel({ candidate, suggestion, position, dictionary, 
                             className="w-full p-2 text-sm border border-slate-200 rounded focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
                             value={genericName}
                             onChange={(e) => setGenericName(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && onAdd(candidate, genericName)}
+                            onKeyDown={(e) => e.key === 'Enter' && onAdd(effectiveCandidate, genericName)}
                         />
                         <div className="flex gap-2">
                             <Button
                                 variant="primary"
                                 className="flex-1 text-xs py-1.5"
-                                onClick={() => onAdd(candidate, genericName)}
+                                onClick={() => onAdd(effectiveCandidate, genericName)}
                                 disabled={!genericName.trim()}
                             >
-                                Add "{candidate}"
+                                Add "{effectiveCandidate}"
                             </Button>
                             <Button
                                 variant="secondary"
