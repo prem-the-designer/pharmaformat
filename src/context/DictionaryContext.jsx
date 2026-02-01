@@ -1,57 +1,128 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import { useToast } from './ToastContext';
 
 const DictionaryContext = createContext();
 
-// Default dictionary for fallback or initial optimistic load
-const DEFAULT_DICTIONARY = {};
-
 export function DictionaryProvider({ children }) {
-    const [dictionary, setDictionary] = useState(DEFAULT_DICTIONARY);
+    const [dictionary, setDictionary] = useState(() => {
+        const saved = localStorage.getItem('drug_dictionary');
+        return saved ? JSON.parse(saved) : {};
+    });
+    const [aliases, setAliases] = useState([]); // Array of { alias_term, language, english_brand }
     const [loading, setLoading] = useState(true);
 
     const { showToast } = useToast();
 
-    // Initial Load from Supabase
+    // Load initial data
     useEffect(() => {
-        async function fetchDictionary() {
+        async function loadData() {
             setLoading(true);
             try {
-                const { data, error } = await supabase
-                    .from('dictionary')
-                    .select('*');
+                // Load Dictionary
+                console.log("Fetching from 'dictionary' table...");
+                const { data: dictData, error: dictError } = await supabase.from('dictionary').select('*');
+                console.log("Dict Data:", dictData);
+                console.log("Dict Error:", dictError);
+                if (dictError) throw dictError;
 
-                if (error) throw error;
-
-                if (data && data.length > 0) {
-                    const dict = {};
-                    data.forEach(item => {
-                        if (item.brand && item.generic) {
-                            dict[item.brand.toLowerCase()] = {
+                if (dictData) {
+                    const dictMap = {};
+                    dictData.forEach(item => {
+                        if (item.brand) {
+                            dictMap[item.brand.toLowerCase()] = {
                                 brand: item.brand,
                                 generic: item.generic
                             };
                         }
                     });
-                    setDictionary(dict);
-                } else {
-                    setDictionary({});
+                    setDictionary(dictMap);
+                    localStorage.setItem('drug_dictionary', JSON.stringify(dictMap));
                 }
+
+                // Load Aliases
+                const { data: aliasData, error: aliasError } = await supabase.from('drug_aliases').select('*');
+                if (aliasError) throw aliasError;
+
+                if (aliasData) {
+                    setAliases(aliasData);
+                }
+
             } catch (err) {
-                console.error("Error loading dictionary from Supabase:", err.message);
+                console.error("Error loading data:", err.message);
+                showToast(`Load Error: ${err.message}`, 'error');
             } finally {
                 setLoading(false);
             }
         }
 
-        fetchDictionary();
+        loadData();
     }, []);
+
+    const importAliases = async (newAliases) => {
+        // newAliases: [{ alias_term, language, english_brand, generic_name, notes }]
+        try {
+            const { data, error } = await supabase
+                .from('drug_aliases')
+                .upsert(newAliases, { onConflict: 'alias_term, language' }) // Fix 409: Upsert
+                .select();
+
+            if (error) throw error;
+
+            if (data) {
+                setAliases(prev => [...prev, ...data]);
+                return data.length;
+            }
+            return 0;
+        } catch (err) {
+            console.error('Alias import error:', err);
+            throw err;
+        }
+    };
+
+    const removeAlias = async (id) => {
+        // Optimistic Update
+        setAliases(prev => prev.filter(a => a.id !== id));
+
+        try {
+            const { error } = await supabase
+                .from('drug_aliases')
+                .delete()
+                .eq('id', id);
+
+            if (error) throw error;
+            showToast('Alias removed successfully', 'success');
+        } catch (err) {
+            console.error("Error removing alias:", err.message);
+            showToast(`Failed to remove alias: ${err.message}`, 'error');
+            // Revert state if needed, but for now simple log
+        }
+    };
+
+    const updateAlias = async (id, updates) => {
+        // updates: { alias_term, language, english_brand, generic_name, notes }
+
+        // Optimistic Update
+        setAliases(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+
+        try {
+            const { error } = await supabase
+                .from('drug_aliases')
+                .update(updates)
+                .eq('id', id);
+
+            if (error) throw error;
+            showToast('Alias updated successfully', 'success');
+        } catch (err) {
+            console.error("Error updating alias:", err.message);
+            showToast(`Failed to update alias: ${err.message}`, 'error');
+        }
+    };
 
     const addEntry = async (brand, generic) => {
         if (!brand || !generic) return;
 
-        const formattedBrand = brand.trim(); // Store exactly as typed (just trimmed)
+        const formattedBrand = brand.trim().toUpperCase(); // Strict Uppercase
         const key = formattedBrand.toLowerCase();
 
         // Duplicate Check
@@ -61,12 +132,12 @@ export function DictionaryProvider({ children }) {
         }
 
         // Optimistic Update
-        const newEntry = { brand: brand.trim(), generic: generic.trim() };
+        const newEntry = { brand: formattedBrand, generic: generic.trim() };
 
         setDictionary(prev => ({ ...prev, [key]: newEntry }));
 
         // Show Success Toast
-        showToast(`Drug ${brand} is added successfully`, 'success');
+        showToast(`Drug ${formattedBrand} is added successfully`, 'success');
 
         try {
             const { error } = await supabase
@@ -106,7 +177,7 @@ export function DictionaryProvider({ children }) {
 
     const updateEntry = async (oldBrand, newBrand, newGeneric) => {
         const oldKey = oldBrand.toLowerCase().trim();
-        const formattedNewBrand = newBrand.trim();
+        const formattedNewBrand = newBrand.trim().toUpperCase(); // Strict Uppercase
         const newKey = formattedNewBrand.toLowerCase();
 
         if (!newKey || !newGeneric) return;
@@ -141,7 +212,7 @@ export function DictionaryProvider({ children }) {
 
         const process = (b, g) => {
             if (b && g) {
-                entriesToInsert.push({ brand: b.trim(), generic: g.trim() });
+                entriesToInsert.push({ brand: b.trim().toUpperCase(), generic: g.trim() }); // Strict Uppercase
             }
         };
 
@@ -185,7 +256,7 @@ export function DictionaryProvider({ children }) {
 
         const process = (b, g) => {
             if (b && g) {
-                entriesToProcess.push({ brand: b.trim(), generic: g.trim() });
+                entriesToProcess.push({ brand: b.trim().toUpperCase(), generic: g.trim() }); // Strict Uppercase
             }
         };
 
@@ -215,7 +286,7 @@ export function DictionaryProvider({ children }) {
     const getEntry = (brand) => dictionary[brand.toLowerCase().trim()];
 
     return (
-        <DictionaryContext.Provider value={{ dictionary, addEntry, removeEntry, updateEntry, importDictionary, analyzeImport, getEntry, resetDictionary, loading }}>
+        <DictionaryContext.Provider value={{ dictionary, aliases, addEntry, removeEntry, updateEntry, importDictionary, importAliases, removeAlias, updateAlias, analyzeImport, getEntry, resetDictionary, loading }}>
             {children}
         </DictionaryContext.Provider>
     );

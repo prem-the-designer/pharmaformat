@@ -7,7 +7,7 @@ import { Button } from './ui/Button';
 import { UnknownDrugPanel } from './ui/UnknownDrugPanel';
 
 export default function Formatter() {
-    const { dictionary, addEntry } = useDictionary();
+    const { dictionary, aliases, addEntry } = useDictionary(); // Get aliases
     const [input, setInput] = useState('');
     const [tokens, setTokens] = useState([]);
     const [ignoreList, setIgnoreList] = useState(new Set());
@@ -18,14 +18,15 @@ export default function Formatter() {
     const outputRef = useRef(null);
 
     useEffect(() => {
-        // Re-run tokenization when input, dict, or ignoreList changes
-        const result = formatAndTokenize(input, dictionary, ignoreList);
+        // Re-run tokenization when input, dict, aliases or ignoreList changes
+        const result = formatAndTokenize(input, dictionary, ignoreList, aliases); // Pass aliases
         setTokens(result);
-    }, [input, dictionary, ignoreList]);
+    }, [input, dictionary, ignoreList, aliases]);
 
     const handleCopy = async () => {
         const plainText = tokens.map(t => t.content).join('');
         if (!plainText) return;
+
         try {
             await navigator.clipboard.writeText(plainText);
             setCopied(true);
@@ -37,7 +38,6 @@ export default function Formatter() {
 
     const handleUnknownClick = (e, text) => {
         const rect = e.target.getBoundingClientRect();
-        const containerRect = e.target.closest('.relative').getBoundingClientRect(); // get relative coordinates
 
         setActiveCandidate({
             text,
