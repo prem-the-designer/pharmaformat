@@ -1,8 +1,10 @@
 import * as XLSX from 'xlsx';
+import { formatAndTokenize } from './formatter';
 
 export const IMPORT_TYPES = {
     ENGLISH: 'english',
-    ALIASES: 'aliases'
+    ALIASES: 'aliases',
+    BULK_FORMAT: 'bulk_format'
 };
 
 export const ALLOWED_LANGUAGES = ['ko', 'ja', 'zh-cn', 'zh-tw'];
@@ -51,12 +53,6 @@ export const validateEnglishImport = (workbook, currentDictionary) => {
         // Duplicate Check (Case-insensitive)
         const lowerBrand = brand.toLowerCase();
         if (currentDictionary[lowerBrand]) {
-            warnings.push({ row: rowNum, message: `Brand "${brand}" already exists. Will allow update.` });
-            // We allow updates/overwrites in this logic, or we could skip. Requirements say "Skip duplicate brand names".
-            // Prompt says: "Skip duplicate brand names".
-            // Let's mark as skipped in this logic or warn? "Block rows" vs "Skip duplicates".
-            // Let's warn and NOT add to valid if we want to skip strictly. 
-            // Re-reading: "Skip duplicate brand names". -> So we shouldn't add them to 'valid'.
             warnings.push({ row: rowNum, message: `Skipping duplicate brand "${brand}".` });
             return;
         }
@@ -131,4 +127,87 @@ export const validateAliasImport = (workbook, currentDictionary) => {
     });
 
     return { valid, errors, warnings };
+};
+
+export const validateBulkFormat = (workbook) => {
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet);
+
+    const valid = [];
+    const errors = [];
+    const warnings = [];
+
+    // Check headers
+    if (rows.length === 0) {
+        errors.push({ row: 1, message: 'File is empty.' });
+        return { valid, errors, warnings };
+    }
+
+    const firstRow = rows[0];
+    const keys = Object.keys(firstRow).map(k => k.toLowerCase());
+
+    // We check for presence of at least one target column
+    if (!keys.includes('headline') && !keys.includes('summary')) {
+        errors.push({ row: 1, message: 'Missing "headline" or "summary" column.' });
+    }
+
+    rows.forEach((row, index) => {
+        // Just checking if we have content to format
+        valid.push(row);
+    });
+
+    return { valid, errors, warnings };
+};
+
+// --- Formatter Integration ---
+
+// We need a helper to run the "formatAndTokenize" logic in a pure JS way (without React state)
+// But formatAndTokenize is in utils/formatter.js and is pure.
+
+export const processExcelForFormatting = (workbook, dictionary, aliases) => {
+    // We'll process the first sheet
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    // Get headers to find columns
+    const range = XLSX.utils.decode_range(sheet['!ref']);
+    const headers = [];
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cell = sheet[XLSX.utils.encode_cell({ r: range.s.r, c: C })];
+        headers.push(cell ? cell.v.toString().trim().toLowerCase() : '');
+    }
+
+    const colHeadline = headers.indexOf('headline');
+    const colSummary = headers.indexOf('summary');
+
+    if (colHeadline === -1 && colSummary === -1) {
+        throw new Error('Could not find "headline" or "summary" columns in the first row.');
+    }
+
+    const rows = XLSX.utils.sheet_to_json(sheet);
+
+    // Process rows
+    const processedRows = rows.map(row => {
+        const newRow = { ...row };
+
+        if (colHeadline !== -1 && row['headline']) {
+            const tokens = formatAndTokenize(row['headline'], dictionary, new Set(), aliases);
+            newRow['formatted_headline'] = tokens.map(t => t.content).join('');
+        }
+
+        if (colSummary !== -1 && row['summary']) {
+            const tokens = formatAndTokenize(row['summary'], dictionary, new Set(), aliases);
+            newRow['formatted_summary'] = tokens.map(t => t.content).join('');
+        }
+
+        return newRow;
+    });
+
+    // Create new sheet
+    const newSheet = XLSX.utils.json_to_sheet(processedRows);
+    const newWorkbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(newWorkbook, newSheet, "Formatted");
+
+    return newWorkbook;
 };

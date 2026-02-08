@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from './Button';
 import { Card } from './Card';
 
@@ -8,11 +8,24 @@ export function UnknownDrugPanel({ candidate, suggestion, position, dictionary, 
     const [searchResults, setSearchResults] = useState([]);
     const [forceUppercase, setForceUppercase] = useState(false);
 
-    // Close on Escape
+    const panelRef = useRef(null);
+
+    // Close on Escape or Click Outside
     useEffect(() => {
         const handleEsc = (e) => e.key === 'Escape' && onClose();
+        const handleClickOutside = (e) => {
+            if (panelRef.current && !panelRef.current.contains(e.target)) {
+                onClose();
+            }
+        };
+
         window.addEventListener('keydown', handleEsc);
-        return () => window.removeEventListener('keydown', handleEsc);
+        document.addEventListener('mousedown', handleClickOutside);
+
+        return () => {
+            window.removeEventListener('keydown', handleEsc);
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
     }, [onClose]);
 
     // Search Logic
@@ -48,10 +61,18 @@ export function UnknownDrugPanel({ candidate, suggestion, position, dictionary, 
         window.open(`https://www.google.com/search?q=${encodeURIComponent(effectiveCandidate + ' drug')}`, '_blank');
     };
 
+    // Calculate position to keep within viewport
+    const PANEL_WIDTH = 320; // w-80
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    const leftPos = position.left + PANEL_WIDTH > viewportWidth - 20
+        ? Math.max(20, viewportWidth - PANEL_WIDTH - 20)
+        : position.left;
+
     return (
         <div
+            ref={panelRef}
             className="fixed z-50 w-80 animate-in fade-in zoom-in-95 duration-200"
-            style={{ top: position.top + 8, left: position.left }}
+            style={{ top: position.top + 8, left: leftPos }}
         >
             <Card className="p-4 shadow-xl border-blue-500/30 ring-1 ring-blue-500/20 bg-white max-h-[80vh] overflow-y-auto">
                 <div className="flex justify-between items-start mb-2">

@@ -107,6 +107,10 @@ export function formatAndTokenize(text, dictionary, ignoreList = new Set(), alia
 
     for (const m of knownMatches) {
         const matchIndex = m.index;
+
+        // Skip matches that are already covered by valid redundancy skipping
+        if (matchIndex < currentIndex) continue;
+
         const matchText = m[0]; // Original text
 
         // Process text BEFORE this match
@@ -124,30 +128,42 @@ export function formatAndTokenize(text, dictionary, ignoreList = new Set(), alia
             const formattedBrand = brand;
             const formattedGeneric = generic;
 
-            // Check for Double Formatting Suffix
+            // Check for Double Formatting Suffix: " (Generic)"
             const textAfter = text.slice(matchIndex + matchText.length);
-            const isFormatted = textAfter.trim().toLowerCase().startsWith(`(${formattedGeneric.toLowerCase()})`);
 
-            // Prefix Check
-            let isPrefix = false;
-            if (matchIndex > 0 && text[matchIndex - 1] === '(') {
-                const pre = text.slice(0, matchIndex - 1).trimEnd();
-                if (pre.toLowerCase().endsWith(brand.toLowerCase()) || pre.toLowerCase().endsWith(generic.toLowerCase())) {
-                    isPrefix = true;
-                }
-            }
+            // Check for strict " (Generic)" pattern (case-insensitive)
+            // Starts with optional whitespace + "(" + generic + ")"
+            const matchSuffix = textAfter.match(new RegExp(`^\\s*\\(${escapeRegExp(formattedGeneric)}\\)`, 'i'));
 
-            if (isFormatted || isPrefix) {
-                tokens.push({ type: TOKEN_TYPES.TEXT, content: matchText });
+            if (matchSuffix) {
+                // Suffix found! E.g. " (talquetamab)" after "Talvey"
+                // 1. Enforce Uppercase Brand (formattedBrand = TALVEY)
+                tokens.push({ type: TOKEN_TYPES.KNOWN, content: formattedBrand });
+
+                // 2. Fix capitalization of the Generic name
+                // Preserve leading whitespace from the match
+                const suffixStr = matchSuffix[0];
+                const parenIndex = suffixStr.indexOf('(');
+                const whitespace = suffixStr.slice(0, parenIndex);
+
+                // Reconstruct with correct casing: whitespace + "(" + formattedGeneric + ")"
+                // formattedGeneric is already Capitalized from addToLookup logic
+                const correctedSuffix = `${whitespace}(${formattedGeneric})`;
+
+                tokens.push({ type: TOKEN_TYPES.TEXT, content: correctedSuffix });
+
+                // 3. Advance index to consume the suffix so it's not matched again
+                currentIndex = matchIndex + matchText.length + matchSuffix[0].length;
             } else {
+                // Standard formatting
                 const content = `${formattedBrand} (${formattedGeneric})`;
                 tokens.push({ type: TOKEN_TYPES.KNOWN, content: content });
+                currentIndex = matchIndex + matchText.length;
             }
         } else {
             tokens.push({ type: TOKEN_TYPES.TEXT, content: matchText });
+            currentIndex = matchIndex + matchText.length;
         }
-
-        currentIndex = matchIndex + matchText.length;
     }
 
     // Process remaining text
@@ -298,4 +314,30 @@ export function findSuggestion(text, dictionary) {
     });
 
     return bestMatch;
+}
+
+/**
+ * Detects language script in text.
+ */
+export function detectLanguage(text) {
+    if (!text || text.trim().length === 0) return null;
+
+    // Sample first 100 chars
+    const sample = text.slice(0, 100);
+
+    // Check for Hangul (Korean)
+    if (/[\uAC00-\uD7AF\u1100-\u11FF]/.test(sample)) return 'Korean';
+
+    // Check for Kana (Japanese)
+    if (/[\u3040-\u309F\u30A0-\u30FF]/.test(sample)) return 'Japanese';
+
+    // Check for Hanzi (Chinese/Kanji) - if Kana wasn't found first
+    // Note: Japanese Kanji also falls here, but usually mixed with Kana.
+    // If pure Hanzi, assume Chinese.
+    if (/[\u4E00-\u9FFF]/.test(sample)) return 'Chinese';
+
+    // Default to Latin/English if alphanumeric
+    if (/[a-zA-Z]/.test(sample)) return 'English';
+
+    return 'Unknown';
 }

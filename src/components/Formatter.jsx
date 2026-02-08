@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useDictionary } from '../context/DictionaryContext';
-import { formatAndTokenize, TOKEN_TYPES, findSuggestion } from '../utils/formatter';
+import { formatAndTokenize, TOKEN_TYPES, findSuggestion, detectLanguage } from '../utils/formatter';
+import { IMPORT_TYPES } from '../utils/excelParser';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { UnknownDrugPanel } from './ui/UnknownDrugPanel';
+import { ExcelImportModal } from './ui/ExcelImportModal';
 
 export default function Formatter() {
     const { dictionary, aliases, addEntry } = useDictionary(); // Get aliases
@@ -12,6 +14,7 @@ export default function Formatter() {
     const [tokens, setTokens] = useState([]);
     const [ignoreList, setIgnoreList] = useState(new Set());
     const [copied, setCopied] = useState(false);
+    const [showBulkModal, setShowBulkModal] = useState(false);
 
     // Interaction State
     const [activeCandidate, setActiveCandidate] = useState(null); // { text, rect }
@@ -92,88 +95,110 @@ export default function Formatter() {
     };
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[calc(100vh-8rem)]">
-            <Card className="flex flex-col h-full bg-white/50 backdrop-blur-sm shadow-xl shadow-slate-200/50 border-white/60">
-                <div className="p-4 border-b border-slate-100 bg-white/40 flex justify-between items-center">
-                    <h2 className="font-semibold text-slate-700 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                        Input Text
-                    </h2>
-                    <span className="text-xs text-slate-400">Paste your text below</span>
-                </div>
-                <textarea
-                    className="flex-1 w-full p-6 bg-transparent resize-none focus:outline-none focus:bg-white/30 transition-colors text-slate-700 leading-relaxed font-mono text-sm placeholder:text-slate-300"
-                    placeholder="Paste medical text here... e.g., 'Darzalex Faspro-based treatment approved...'"
-                    value={input}
-                    onChange={(e) => {
-                        setInput(e.target.value);
-                        setActiveCandidate(null); // Close panel on any text change
-                    }}
-                    spellCheck="false"
-                />
-            </Card>
-
-            <Card className="flex flex-col h-full bg-gradient-to-br from-blue-50/50 to-indigo-50/50 backdrop-blur-sm shadow-xl shadow-blue-500/5 border-blue-100/50 relative">
-                <div className="p-4 border-b border-blue-100/50 bg-white/30 flex justify-between items-center">
-                    <h2 className="font-semibold text-blue-900 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                        Formatted Output
-                    </h2>
-                    <div className="flex gap-2">
-                        <Button
-                            variant="secondary"
-                            onClick={handleManualHighlight}
-                            className="text-xs py-1 px-3 shadow-none flex items-center gap-1 border border-blue-200 bg-white"
-                            title="Highlight selected text to add/correct"
-                        >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                            Highlight
-                        </Button>
-                        <Button variant="primary" onClick={handleCopy} className="text-xs py-1 px-3 shadow-none">
-                            {copied ? 'Copied!' : 'Copy Text'}
-                        </Button>
-                    </div>
-                </div>
-                <div
-                    ref={outputRef}
-                    className="flex-1 w-full p-6 overflow-y-auto overflow-x-hidden leading-relaxed font-mono text-sm whitespace-pre-wrap relative"
-                    onScroll={() => setActiveCandidate(null)} // Close popup on scroll
+        <div className="flex flex-col gap-4 h-[60vh] min-h-[400px]">
+            {/* Toolbar for Bulk Actions */}
+            <div className="flex justify-end relative">
+                <Button
+                    variant="secondary"
+                    onClick={() => setShowBulkModal(true)}
+                    className="text-xs flex items-center gap-2"
                 >
-                    {tokens.length === 0 && <span className="text-slate-400 italic">Formatted text will appear here...</span>}
+                    <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    Import Bulk
+                </Button>
+            </div>
 
-                    {tokens.map((token, idx) => {
-                        if (token.type === TOKEN_TYPES.UNKNOWN) {
-                            return (
-                                <span
-                                    key={idx}
-                                    className={`border-b-2 border-dashed cursor-pointer text-slate-800 ${token.data?.suggestion ? 'bg-orange-50 border-orange-300 hover:bg-orange-100' : 'bg-yellow-100 border-yellow-400 hover:bg-yellow-200'}`}
-                                    onClick={(e) => handleUnknownClick(e, token.content)}
-                                    title={token.data?.suggestion ? "Possible Typo" : "Unknown Drug"}
-                                    data-suggestion={token.data?.suggestion ? JSON.stringify(token.data.suggestion) : ''}
-                                >
-                                    {token.content}
-                                </span>
-                            );
-                        }
-                        // KNOWN or TEXT
-                        return <span key={idx} className="text-slate-800">{token.content}</span>;
-                    })}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full">
+                <Card className="flex flex-col h-full bg-white/50 backdrop-blur-sm shadow-xl shadow-slate-200/50 border-white/60">
+                    <div className="p-4 border-b border-slate-100 bg-white/40 flex justify-between items-center">
+                        <h2 className="font-semibold text-slate-700 flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                            Input Text
+                        </h2>
+                        <span className={`text-xs ${input ? 'text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded' : 'text-slate-400'}`}>
+                            {input ? `Detected: ${detectLanguage(input)}` : 'Paste your text below'}
+                        </span>
+                    </div>
+                    <textarea
+                        className="flex-1 w-full p-6 bg-transparent resize-none focus:outline-none focus:bg-white/30 transition-colors text-slate-700 leading-relaxed font-mono text-sm placeholder:text-slate-300 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent"
+                        placeholder="Paste medical text here... e.g., 'Darzalex Faspro-based treatment approved...'"
+                        value={input}
+                        onChange={(e) => {
+                            setInput(e.target.value);
+                            setActiveCandidate(null); // Close panel on any text change
+                        }}
+                        spellCheck="false"
+                    />
+                </Card>
 
-                    {activeCandidate && createPortal(
-                        <UnknownDrugPanel
-                            candidate={activeCandidate.text}
-                            suggestion={activeCandidate.suggestion}
-                            position={activeCandidate.position}
-                            dictionary={dictionary}
-                            onAdd={handleAddUnknown}
-                            onReplace={handleReplace}
-                            onIgnore={handleIgnoreUnknown}
-                            onClose={() => setActiveCandidate(null)}
-                        />,
-                        document.body
-                    )}
-                </div>
-            </Card>
+                <Card className="flex flex-col h-full bg-gradient-to-br from-blue-50/50 to-indigo-50/50 backdrop-blur-sm shadow-xl shadow-blue-500/5 border-blue-100/50 relative">
+                    <div className="p-4 border-b border-blue-100/50 bg-white/30 flex justify-between items-center">
+                        <h2 className="font-semibold text-blue-900 flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                            Formatted Output
+                        </h2>
+                        <div className="flex gap-2">
+                            <Button
+                                variant="secondary"
+                                onClick={handleManualHighlight}
+                                className="text-xs py-1 px-3 shadow-none flex items-center gap-1 border border-blue-200 bg-white"
+                                title="Highlight selected text to add/correct"
+                            >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                Highlight
+                            </Button>
+                            <Button variant="primary" onClick={handleCopy} className="text-xs py-1 px-3 shadow-none">
+                                {copied ? 'Copied!' : 'Copy Text'}
+                            </Button>
+                        </div>
+                    </div>
+                    <div
+                        ref={outputRef}
+                        className="flex-1 w-full p-6 overflow-y-auto overflow-x-hidden leading-relaxed font-mono text-sm whitespace-pre-wrap relative scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent"
+                        onScroll={() => setActiveCandidate(null)} // Close popup on scroll
+                    >
+                        {tokens.length === 0 && <span className="text-slate-400 italic">Formatted text will appear here...</span>}
+
+                        {tokens.map((token, idx) => {
+                            if (token.type === TOKEN_TYPES.UNKNOWN) {
+                                return (
+                                    <span
+                                        key={idx}
+                                        className={`border-b-2 border-dashed cursor-pointer text-slate-800 ${token.data?.suggestion ? 'bg-orange-50 border-orange-300 hover:bg-orange-100' : 'bg-yellow-100 border-yellow-400 hover:bg-yellow-200'}`}
+                                        onClick={(e) => handleUnknownClick(e, token.content)}
+                                        title={token.data?.suggestion ? "Possible Typo" : "Unknown Drug"}
+                                        data-suggestion={token.data?.suggestion ? JSON.stringify(token.data.suggestion) : ''}
+                                    >
+                                        {token.content}
+                                    </span>
+                                );
+                            }
+                            // KNOWN or TEXT
+                            return <span key={idx} className="text-slate-800">{token.content}</span>;
+                        })}
+
+                        {activeCandidate && createPortal(
+                            <UnknownDrugPanel
+                                candidate={activeCandidate.text}
+                                suggestion={activeCandidate.suggestion}
+                                position={activeCandidate.position}
+                                dictionary={dictionary}
+                                onAdd={handleAddUnknown}
+                                onReplace={handleReplace}
+                                onIgnore={handleIgnoreUnknown}
+                                onClose={() => setActiveCandidate(null)}
+                            />,
+                            document.body
+                        )}
+                    </div>
+                </Card>
+            </div>
+
+            <ExcelImportModal
+                isOpen={showBulkModal}
+                onClose={() => setShowBulkModal(false)}
+                type={IMPORT_TYPES.BULK_FORMAT}
+            />
         </div>
     );
 }

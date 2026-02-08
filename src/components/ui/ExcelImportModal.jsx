@@ -1,14 +1,16 @@
 import { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
-import { parseExcelFile, validateEnglishImport, validateAliasImport, IMPORT_TYPES } from '../../utils/excelParser';
+import { parseExcelFile, validateEnglishImport, validateAliasImport, validateBulkFormat, processExcelForFormatting, IMPORT_TYPES } from '../../utils/excelParser';
 import { useDictionary } from '../../context/DictionaryContext';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 
 export function ExcelImportModal({ isOpen, onClose, type = IMPORT_TYPES.ENGLISH }) {
-    const { dictionary, importDictionary, importAliases } = useDictionary();
+    const { dictionary, aliases, importDictionary, importAliases } = useDictionary();
     const [step, setStep] = useState('upload'); // upload, preview, processing, done
     const [file, setFile] = useState(null);
+    const [workbook, setWorkbook] = useState(null); // Store workbook
     const [stats, setStats] = useState(null); // { valid, errors, warnings }
     const [statusMsg, setStatusMsg] = useState('');
 
@@ -22,13 +24,16 @@ export function ExcelImportModal({ isOpen, onClose, type = IMPORT_TYPES.ENGLISH 
         setFile(selectedFile);
 
         try {
-            const workbook = await parseExcelFile(selectedFile);
+            const wb = await parseExcelFile(selectedFile);
+            setWorkbook(wb);
             let validationResult;
 
             if (type === IMPORT_TYPES.ENGLISH) {
-                validationResult = validateEnglishImport(workbook, dictionary);
+                validationResult = validateEnglishImport(wb, dictionary);
+            } else if (type === IMPORT_TYPES.ALIASES) {
+                validationResult = validateAliasImport(wb, dictionary);
             } else {
-                validationResult = validateAliasImport(workbook, dictionary);
+                validationResult = validateBulkFormat(wb);
             }
 
             setStats(validationResult);
@@ -47,13 +52,21 @@ export function ExcelImportModal({ isOpen, onClose, type = IMPORT_TYPES.ENGLISH 
             let count = 0;
             if (type === IMPORT_TYPES.ENGLISH) {
                 count = await importDictionary(stats.valid);
-            } else {
+                setStatusMsg(`Successfully imported ${count} entries.`);
+            } else if (type === IMPORT_TYPES.ALIASES) {
                 count = await importAliases(stats.valid);
+                setStatusMsg(`Successfully imported ${count} entries.`);
+            } else if (type === IMPORT_TYPES.BULK_FORMAT) {
+                // Process and Download
+                const newWorkbook = processExcelForFormatting(workbook, dictionary, aliases);
+                XLSX.writeFile(newWorkbook, `Formatted_${file.name}`);
+                setStatusMsg(`File processed and downloaded.`);
             }
-            setStatusMsg(`Successfully imported ${count} entries.`);
+
             setStep('done');
         } catch (err) {
-            setStatusMsg('Error importing data. Please check console.');
+            console.error(err);
+            setStatusMsg(`Error: ${err.message}`);
             setStep('preview'); // Allow retry
         }
     };
@@ -61,6 +74,7 @@ export function ExcelImportModal({ isOpen, onClose, type = IMPORT_TYPES.ENGLISH 
     const handleReset = () => {
         setStep('upload');
         setFile(null);
+        setWorkbook(null);
         setStats(null);
         setStatusMsg('');
     };
@@ -70,31 +84,50 @@ export function ExcelImportModal({ isOpen, onClose, type = IMPORT_TYPES.ENGLISH 
         onClose();
     };
 
-    const isEnglish = type === IMPORT_TYPES.ENGLISH;
-    const title = isEnglish ? 'Import English Dictionary' : 'Import Foreign Aliases';
-    const templateName = isEnglish ? 'english_drug_dictionary.xlsx' : 'drug_language_aliases.xlsx';
+    let title = 'Import';
+    let templateName = 'template.xlsx';
+    if (type === IMPORT_TYPES.ENGLISH) {
+        title = 'Import English Dictionary';
+        templateName = 'english_drug_dictionary.xlsx';
+    } else if (type === IMPORT_TYPES.ALIASES) {
+        title = 'Import Foreign Aliases';
+        templateName = 'drug_language_aliases.xlsx';
+    } else if (type === IMPORT_TYPES.BULK_FORMAT) {
+        title = 'Bulk Format (Excel)';
+        templateName = 'Bulk_Format_Template.xlsx';
+    }
 
     const downloadTemplate = () => {
-        const wsData = isEnglish
-            ? [['brand_name', 'generic_name', 'notes'], ['Keytruda', 'pembrolizumab', 'Example']]
-            : [['alias_term', 'language', 'english_brand', 'generic_name', 'notes'], ['키트루다', 'ko', 'Keytruda', 'pembrolizumab', 'Korean Name']];
+        let wsData = [];
+        let sheetName = 'Template';
+
+        if (type === IMPORT_TYPES.ENGLISH) {
+            wsData = [['brand_name', 'generic_name', 'notes'], ['Keytruda', 'pembrolizumab', 'Example']];
+            sheetName = 'English_Drugs';
+        } else if (type === IMPORT_TYPES.ALIASES) {
+            wsData = [['alias_term', 'language', 'english_brand', 'generic_name', 'notes'], ['키트루다', 'ko', 'Keytruda', 'pembrolizumab', 'Korean Name']];
+            sheetName = 'Language_Aliases';
+        } else {
+            wsData = [['headline', 'summary'], ['Example Drug Headline', 'This is a summary.']];
+            sheetName = 'Bulk_Format';
+        }
 
         const ws = XLSX.utils.aoa_to_sheet(wsData);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, isEnglish ? 'English_Drugs' : 'Language_Aliases');
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
         XLSX.writeFile(wb, templateName);
     };
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+    return createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
             <Card className="w-full max-w-2xl bg-white shadow-2xl max-h-[90vh] flex flex-col">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-xl">
                     <div>
                         <h2 className="text-xl font-bold text-slate-800">{title}</h2>
                         <p className="text-sm text-slate-500">
                             {step === 'upload' && 'Select an Excel file to begin.'}
-                            {step === 'preview' && 'Review validation results before committing.'}
-                            {step === 'done' && 'Import complete.'}
+                            {step === 'preview' && 'Review validation results before processing.'}
+                            {step === 'done' && 'Process complete.'}
                         </p>
                     </div>
                     <button onClick={handleClose} className="text-slate-400 hover:text-slate-600 transition-colors">
@@ -107,7 +140,7 @@ export function ExcelImportModal({ isOpen, onClose, type = IMPORT_TYPES.ENGLISH 
                         <div className="flex flex-col items-center justify-center space-y-6 py-8">
                             <div className="text-center">
                                 <Button variant="secondary" onClick={downloadTemplate} className="mb-4">
-                                    Download {isEnglish ? 'English' : 'Foreign'} Template
+                                    Download Template
                                 </Button>
                                 <p className="text-xs text-slate-400 max-w-xs mx-auto">
                                     Use the template to format your data. Only .xlsx files are supported.
@@ -170,8 +203,12 @@ export function ExcelImportModal({ isOpen, onClose, type = IMPORT_TYPES.ENGLISH 
 
                             <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
                                 <p className="text-blue-800 text-sm font-medium">
-                                    Ready to import <span className="font-bold">{stats.valid.length}</span> rows.
-                                    {stats.errors.length > 0 && " Rows with errors will be skipped."}
+                                    {type === IMPORT_TYPES.BULK_FORMAT ? (
+                                        `Ready to process ${stats.valid.length} rows.`
+                                    ) : (
+                                        `Ready to import ${stats.valid.length} rows.`
+                                    )}
+                                    {stats.errors.length > 0 && " Rows with errors will be skipped/blocked."}
                                 </p>
                             </div>
                         </div>
@@ -180,7 +217,7 @@ export function ExcelImportModal({ isOpen, onClose, type = IMPORT_TYPES.ENGLISH 
                     {step === 'processing' && (
                         <div className="flex flex-col items-center justify-center py-12">
                             <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
-                            <p className="text-slate-600 font-medium">Importing data...</p>
+                            <p className="text-slate-600 font-medium">Processing...</p>
                         </div>
                     )}
 
@@ -189,7 +226,7 @@ export function ExcelImportModal({ isOpen, onClose, type = IMPORT_TYPES.ENGLISH 
                             <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4 text-2xl">
                                 ✔
                             </div>
-                            <p className="text-lg font-bold text-slate-800 mb-2">Import Successful</p>
+                            <p className="text-lg font-bold text-slate-800 mb-2">{type === IMPORT_TYPES.BULK_FORMAT ? 'Processing Complete' : 'Import Successful'}</p>
                             <p className="text-slate-600">{statusMsg}</p>
                         </div>
                     )}
@@ -207,14 +244,15 @@ export function ExcelImportModal({ isOpen, onClose, type = IMPORT_TYPES.ENGLISH 
                                     disabled={stats?.valid.length === 0}
                                     variant="primary"
                                 >
-                                    Confirm Import
+                                    {type === IMPORT_TYPES.BULK_FORMAT ? 'Download Formatted File' : 'Confirm Import'}
                                 </Button>
                             )}
                         </>
                     )}
                 </div>
             </Card>
-        </div>
+        </div>,
+        document.body
     );
 }
 
