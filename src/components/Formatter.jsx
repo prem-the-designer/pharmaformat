@@ -85,10 +85,18 @@ export default function Formatter() {
 
     const handleReplace = (newBrand) => {
         // Replace all instances of the typo with the correct brand
-        // We use a safe regex replacement
+        // If the user highlighted a formatted drug like "BRAND (Generic)", 
+        // we extract just the "BRAND" part so it matches the raw unformatted input.
+        let textToReplace = activeCandidate.text.trim();
+        const formattedMatch = textToReplace.match(/^(.+?)\s*\(/);
+        if (formattedMatch) {
+            textToReplace = formattedMatch[1].trim();
+        }
+
+        // We use a safe regex replacement with case-insensitivity ('gi') so it matches mixed-case input
         const escapeRegExp = (curr) => curr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const escapedCurrent = escapeRegExp(activeCandidate.text);
-        const regex = new RegExp(`\\b${escapedCurrent}\\b`, 'g');
+        const escapedCurrent = escapeRegExp(textToReplace);
+        const regex = new RegExp(`\\b${escapedCurrent}\\b`, 'gi');
 
         setInput(prev => prev.replace(regex, newBrand));
         setActiveCandidate(null);

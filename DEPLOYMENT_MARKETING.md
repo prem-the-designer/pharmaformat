@@ -1,9 +1,9 @@
-# 🚀 PharmaFormat: Precision in Every Prescription
+# 🚀 Pharmat: Precision in Every Prescription
 
 ### **Stop Wrestling with Drug Names. Start Formatting with Precision.**
 
 Are you tired of manually correcting drug casing? Do typos slip through your final review? 
-**PharmaFormat** is the intelligent, AI-driven assistant designed to revolutionize how medical writers and editors handle pharmaceutical terminology. 
+**Pharmat** is the intelligent, AI-driven assistant designed to revolutionize how medical writers and editors handle pharmaceutical terminology. 
 
 ---
 
@@ -11,7 +11,7 @@ Are you tired of manually correcting drug casing? Do typos slip through your fin
 
 Manual proofreading is slow, tedious, and prone to human error. One missed capitalization can compromise the professionalism of your document. 
 
-**PharmaFormat** acts as your automated safety net. It strictly enforces your style guide, ensuring that every brand name and generic term is formatted perfectly—instantly.
+**Pharmat** acts as your automated safety net. It strictly enforces your style guide, ensuring that every brand name and generic term is formatted perfectly—instantly.
 
 ---
 
@@ -42,4 +42,4 @@ Manual proofreading is slow, tedious, and prone to human error. One missed capit
 ## 🚀 Ready to Upgrade Your Workflow?
 
 Say goodbye to manual formatting errors. 
-**Deploy PharmaFormat today and experience the future of medical text processing.**
+**Deploy Pharmat today and experience the future of medical text processing.**

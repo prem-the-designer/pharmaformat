@@ -8,6 +8,12 @@ export function UnknownDrugPanel({ candidate, suggestion, position, dictionary, 
     const [searchResults, setSearchResults] = useState([]);
     const [forceUppercase, setForceUppercase] = useState(false);
 
+    // Use refs instead of state for high-performance dragging
+    const offset = useRef({ x: 0, y: 0 });
+    const isDragging = useRef(false);
+    const dragStartPos = useRef({ x: 0, y: 0 });
+    const dragListeners = useRef(null);
+
     const panelRef = useRef(null);
 
     // Close on Escape or Click Outside
@@ -27,6 +33,54 @@ export function UnknownDrugPanel({ candidate, suggestion, position, dictionary, 
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, [onClose]);
+
+    // Fluid Dragging Logic
+    const handlePointerDown = (e) => {
+        // Prevent dragging if clicking on interactive elements
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+
+        isDragging.current = true;
+        dragStartPos.current = {
+            x: e.clientX - offset.current.x,
+            y: e.clientY - offset.current.y
+        };
+        // Prevent text selection while dragging
+        document.body.style.userSelect = 'none';
+
+        const handlePointerMove = (ev) => {
+            if (!isDragging.current) return;
+            offset.current = {
+                x: ev.clientX - dragStartPos.current.x,
+                y: ev.clientY - dragStartPos.current.y
+            };
+            // Fluid GPU-accelerated transform without React re-renders
+            if (panelRef.current) {
+                panelRef.current.style.transform = `translate3d(${offset.current.x}px, ${offset.current.y}px, 0)`;
+            }
+        };
+
+        const handlePointerUp = () => {
+            isDragging.current = false;
+            document.body.style.userSelect = '';
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+            dragListeners.current = null;
+        };
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+        dragListeners.current = { move: handlePointerMove, up: handlePointerUp };
+    };
+
+    useEffect(() => {
+        return () => {
+            if (dragListeners.current) {
+                window.removeEventListener('pointermove', dragListeners.current.move);
+                window.removeEventListener('pointerup', dragListeners.current.up);
+            }
+            document.body.style.userSelect = '';
+        };
+    }, []);
 
     // Search Logic
     useEffect(() => {
@@ -72,11 +126,19 @@ export function UnknownDrugPanel({ candidate, suggestion, position, dictionary, 
         <div
             ref={panelRef}
             className="fixed z-50 w-80 animate-in fade-in zoom-in-95 duration-200"
-            style={{ top: position.top + 8, left: leftPos }}
+            style={{
+                top: position.top + 8,
+                left: leftPos,
+                transform: `translate3d(${offset.current.x}px, ${offset.current.y}px, 0)`,
+                willChange: 'transform' // hint for GPU optimization
+            }}
         >
             <Card className="p-4 shadow-xl border-blue-500/30 ring-1 ring-blue-500/20 bg-white max-h-[80vh] overflow-y-auto">
-                <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-bold text-slate-800">{isKnownDrug ? 'Drug Detected' : 'Unknown Drug'}</h3>
+                <div
+                    className="flex justify-between items-start mb-2 cursor-grab active:cursor-grabbing"
+                    onPointerDown={handlePointerDown}
+                >
+                    <h3 className="font-bold text-slate-800 select-none">{isKnownDrug ? 'Drug Detected' : 'Unknown Drug'}</h3>
                     <div className="flex gap-1 items-center">
                         <button
                             onClick={(e) => {

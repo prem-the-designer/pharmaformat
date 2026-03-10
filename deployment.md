@@ -2,7 +2,7 @@
 
 ## 1. Deployment (Client-Side Static Build)
 
-Since **PharmaFormat** is a React Single Page Application (SPA), it can be deployed to any static hosting provider.
+Since **Pharmat** is a React Single Page Application (SPA), it can be deployed to any static hosting provider.
 
 ### Build Steps
 1.  Open your terminal in the project folder.

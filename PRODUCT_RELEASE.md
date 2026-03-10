@@ -1,6 +1,6 @@
-# Product Release Notes - PharmaFormat
+# Product Release Notes - Pharmat
 
-PharmaFormat is a powerful, agentic AI-driven solution designed to streamline the formatting of drug names and manage pharmaceutical terminology with precision. This release introduces a comprehensive suite of features for finding, managing, and formatting drug information.
+Pharmat is a powerful, agentic AI-driven solution designed to streamline the formatting of drug names and manage pharmaceutical terminology with precision. This release introduces a comprehensive suite of features for finding, managing, and formatting drug information.
 
 ## Key Features
 
